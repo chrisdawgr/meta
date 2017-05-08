@@ -13,6 +13,9 @@
 #include "meta/util/mapping.h"
 #include "meta/util/printing.h"
 #include "meta/util/shim.h"
+#include <iostream>
+
+using namespace std;
 
 namespace meta
 {
@@ -62,6 +65,39 @@ void ir_eval::init_index(const std::string& path)
         if (relevance > 0)
             qrels_[q_id][d_id] = relevance;
     }
+}
+
+double ir_eval::RR(const std::vector<search_result>& results,
+                          query_id q_id, doc_id d_id, uint64_t num_docs)
+{
+    if (results.empty()) {
+      mrr_res.push_back(0.0);
+      return 0.0;
+    }
+    const auto& ht = qrels_.find(q_id);
+    if (ht == qrels_.end()) {
+        mrr_res.push_back(0.0);
+        return 0.0;
+    }
+    uint64_t i = 1;
+    for (auto& result : results)
+    {
+        if (d_id == result.d_id) {
+            mrr_res.push_back(1.0 / i);
+            return 1.0 / i;
+        }
+        if (i++ == num_docs)
+            break;
+    }
+    mrr_res.push_back(0.0);
+    return 0.0;
+}
+
+double ir_eval::MRR() const
+{
+    if (mrr_res.empty())
+        return 0.0;
+    return std::accumulate(mrr_res.begin(), mrr_res.end(), 0.0) / mrr_res.size();
 }
 
 double ir_eval::precision(const std::vector<search_result>& results,
@@ -234,6 +270,11 @@ void ir_eval::print_stats(const std::vector<search_result>& results,
     out << w1 << printing::make_bold("  Recall:") << w2 << std::setprecision(p)
         << recall(results, q_id, num_docs);
     out << std::endl;
+}
+
+void ir_eval::reset_mrr()
+{
+    mrr_res.clear();
 }
 
 void ir_eval::reset_stats()
