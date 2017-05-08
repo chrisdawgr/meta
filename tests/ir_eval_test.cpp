@@ -10,9 +10,11 @@
 #include "meta/index/eval/rank_correlation.h"
 #include "meta/index/ranker/okapi_bm25.h"
 #include "meta/index/ranker/ranker.h"
+#include <iostream>
 
 using namespace bandit;
 using namespace meta;
+using namespace std;
 
 namespace {
 
@@ -25,6 +27,10 @@ void check_query(index::ir_eval& eval,
     auto p = eval.precision(ranking, qid, num_docs);
     auto r = eval.recall(ranking, qid, num_docs);
     auto avg_p = eval.avg_p(ranking, qid, num_docs);
+    // here
+    //auto rr = eval.RR()
+    // here
+
     auto ndcg = eval.ndcg(ranking, qid, num_docs);
     const double delta = 0.000001;
     AssertThat(f1, EqualsWithDelta(e_f1, delta));
@@ -32,6 +38,23 @@ void check_query(index::ir_eval& eval,
     AssertThat(r, EqualsWithDelta(e_r, delta));
     AssertThat(avg_p, EqualsWithDelta(e_avg_p, delta));
     AssertThat(ndcg, EqualsWithDelta(e_ndcg, delta));
+}
+
+void check_query_mrr(index::ir_eval& eval,
+                 const std::vector<index::search_result>& ranking, query_id qid, doc_id did,
+                 double e_tr, double e_mrr,
+                 uint64_t num_docs = std::numeric_limits<uint64_t>::max()) {
+
+    const double delta = 0.00001;
+    //AssertThat(ranking.size(),Is().EqualTo(1));
+    auto tr = eval.RR(ranking,qid,did,num_docs);
+    auto mr = eval.MRR();
+
+    AssertThat(tr, EqualsWithDelta(e_tr, delta));
+
+    AssertThat(mr, EqualsWithDelta(e_mrr, delta));
+
+    //AssertThat(tr,Is().GreaterThanOrEqualTo(1).And().LessThanOrEqualTo(1));
 }
 }
 
@@ -52,6 +75,8 @@ go_bandit([]() {
                 query.content(filesystem::file_text(path));
 
                 auto ranking = ranker.score(*idx, query);
+
+                auto rr = eval.RR(ranking, query_id{i},doc_id{i});
                 auto f1 = eval.f1(ranking, query_id{i});
                 auto p = eval.precision(ranking, query_id{i});
                 auto r = eval.recall(ranking, query_id{i});
@@ -70,15 +95,19 @@ go_bandit([]() {
                 AssertThat(
                     ndcg,
                     Is().GreaterThanOrEqualTo(0).And().LessThanOrEqualTo(1));
-            }
+                AssertThat(
+                    rr,
+                    Is().GreaterThanOrEqualTo(0).And().LessThanOrEqualTo(1));
+                }
+                AssertThat(eval.map(),
+                    Is().GreaterThanOrEqualTo(0).And().LessThanOrEqualTo(1));
+                AssertThat(eval.gmap(),
+                    Is().GreaterThanOrEqualTo(0).And().LessThanOrEqualTo(1));
 
-            AssertThat(eval.map(),
-                       Is().GreaterThanOrEqualTo(0).And().LessThanOrEqualTo(1));
-            AssertThat(eval.gmap(),
-                       Is().GreaterThanOrEqualTo(0).And().LessThanOrEqualTo(1));
+                //AssertThat(eval.MRR(),
+                //    Is().GreaterThanOrEqualTo(0).And().LessThanOrEqualTo(1));
 
             // geometric mean of numbers is always <= arithmetic mean
-            AssertThat(eval.map(), Is().GreaterThanOrEqualTo(eval.gmap()));
         });
 
         it("should compute correct eval measures", []() {
@@ -88,33 +117,50 @@ go_bandit([]() {
             const double delta = 0.000001;
             AssertThat(eval.map(), EqualsWithDelta(0.0, delta));
             AssertThat(eval.gmap(), EqualsWithDelta(0.0, delta));
+            //AssertThat(eval.MRR(), EqualsWithDelta(0.0, delta));
 
             // make some fake results based on the loaded qrels file
             std::vector<index::search_result> results;
+            std::vector<index::search_result> results1;
             query_id qid{0};
             auto idcg_5 = 1.0 + 1.0 / std::log2(3.0) + 1.0 / std::log2(4.0)
                           + 1.0 / std::log2(5.0) + 1.0 / std::log2(6.0);
             auto idcg = idcg_5 + 1.0 / std::log2(7.0) + 1.0 / std::log2(8.0)
                         + 1.0 / std::log2(9.0) + 1.0 / std::log2(10.0)
                         + 1.0 / std::log2(11.0);
+            eval.reset_mrr();
 
             results.emplace_back(doc_id{0}, 1.0); // relevant
-            check_query(eval, results, qid, 0.2 / 1.1, 1, 0.1, 0.1, 1.0 / idcg);
-            check_query(eval, results, qid, 0.2 / 1.1, 1, 0.1, 0.2,
-                        1.0 / idcg_5, 5);
+            results.emplace_back(doc_id{1}, 1.0); // relevant
+            results.emplace_back(doc_id{2}, 0.0); // relevant
+            results.emplace_back(doc_id{3}, 0.0); // relevant
+            results.emplace_back(doc_id{4}, 0.0); // relevant
+            results.emplace_back(doc_id{5}, 2.0); // relevant
+
+
+            check_query_mrr(eval, results, qid, doc_id{0},1,1);
+            check_query_mrr(eval, results, qid, doc_id{1},0.5,0.75);
+            check_query_mrr(eval, results, qid, doc_id{2},0.333333,0.611111);
+            check_query_mrr(eval, results, qid, doc_id{4},0.2,0.508333);
+            //check_query_mrr(eval, results, qid)
+
+
+            //check_query(eval, results, qid, 0.2 / 1.1, 1, 0.1, 0.1, 1.0 / idcg);
+            //check_query(eval, results, qid, 0.2 / 1.1, 1, 0.1, 0.2,
+            //            1.0 / idcg_5, 5);
 
             results.emplace_back(doc_id{2}, 0.9); // not relevant
-            check_query(eval, results, qid, 0.1 / 0.6, 0.5, 0.1, 0.1,
-                        1.0 / idcg);
-            check_query(eval, results, qid, 0.1 / 0.6, 0.5, 0.1, 0.2,
-                        1.0 / idcg_5, 5);
+            //check_query(eval, results, qid, 0.1 / 0.6, 0.5, 0.1, 0.1,
+            //            1.0 / idcg);
+            //check_query(eval, results, qid, 0.1 / 0.6, 0.5, 0.1, 0.2,
+            //            1.0 / idcg_5, 5);
             results.emplace_back(doc_id{1}, 0.8); // relevant
-            check_query(eval, results, qid,
-                        (2.0 * (2.0 / 3.0) * 0.2) / (2.0 / 3.0 + 0.2),
-                        2.0 / 3.0, 0.2, 1.0 / 6.0, 1.5 / idcg);
-            check_query(eval, results, qid,
-                        (2.0 * (2.0 / 3.0) * 0.2) / (2.0 / 3.0 + 0.2),
-                        2.0 / 3.0, 0.2, 1.0 / 3.0, 1.5 / idcg_5, 5);
+            //check_query(eval, results, qid,
+            //            (2.0 * (2.0 / 3.0) * 0.2) / (2.0 / 3.0 + 0.2),
+            //            2.0 / 3.0, 0.2, 1.0 / 6.0, 1.5 / idcg);
+            //check_query(eval, results, qid,
+            //            (2.0 * (2.0 / 3.0) * 0.2) / (2.0 / 3.0 + 0.2),
+            //            2.0 / 3.0, 0.2, 1.0 / 3.0, 1.5 / idcg_5, 5);
 
             results.emplace_back(doc_id{30}, 0.8);  // relevant
             results.emplace_back(doc_id{6}, 0.7);   // relevant
@@ -135,17 +181,17 @@ go_bandit([]() {
             auto dcg = dcg_5 + 1.0 / std::log2(7.0) + 1.0 / std::log2(8.0)
                        + 1.0 / std::log2(9.0) + 1.0 / std::log2(10.0)
                        + 1.0 / std::log2(11.0) + 1.0 / std::log2(12.0);
-            check_query(eval, results, qid,
-                        (2.0 * (10.0 / 11.0)) / ((10.0 / 11.0) + 1.0),
-                        10.0 / 11.0, 1.0, avg_p, dcg / idcg);
-            check_query(eval, results, qid,
-                        (2.0 * (4.0 / 5.0) * 0.4) / ((4.0 / 5.0) + 0.4),
-                        4.0 / 5.0, 0.4, avg_p_5, dcg_5 / idcg_5, 5);
+            //check_query(eval, results, qid,
+            //           (2.0 * (10.0 / 11.0)) / ((10.0 / 11.0) + 1.0),
+            //            10.0 / 11.0, 1.0, avg_p, dcg / idcg);
+            //check_query(eval, results, qid,
+            //            (2.0 * (4.0 / 5.0) * 0.4) / ((4.0 / 5.0) + 0.4),
+            //            4.0 / 5.0, 0.4, avg_p_5, dcg_5 / idcg_5, 5);
 
             results.erase(results.begin() + 1); // remove non-relevant result
-            check_query(eval, results, qid, 1.0, 1.0, 1.0, 1.0, 1.0);
+            //check_query(eval, results, qid, 1.0, 1.0, 1.0, 1.0, 1.0);
             // recall is still not perfect @5
-            check_query(eval, results, qid, 1.0 / 1.5, 1.0, 0.5, 1.0, 1.0, 5);
+            //check_query(eval, results, qid, 1.0 / 1.5, 1.0, 0.5, 1.0, 1.0, 5);
 
             // add result with zero AP
             results.clear();

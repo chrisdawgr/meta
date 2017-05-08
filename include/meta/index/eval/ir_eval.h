@@ -91,6 +91,13 @@ class ir_eval
     double avg_p(const result_type& results, query_id q_id,
                  uint64_t num_docs = std::numeric_limits<uint64_t>::max());
 
+    //double RR(const std:vector<search_result>& results,
+    //                      query_id q_id, doc_id d_id, uint64_t num_docs) const;
+
+    double RR(const result_type& results, query_id q_id, doc_id d_id, uint64_t num_docs = std::numeric_limits<uint64_t>::max());
+
+    double MRR() const;
+
     /**
      * @return the Mean Average Precision for a set of queries.
      * Note that avg_p() must be called in order for the individual query scores
@@ -121,6 +128,7 @@ class ir_eval
      * Clears saved scores for MAP and gMAP.
      */
     void reset_stats();
+    void reset_mrr();
 
   private:
     /**
@@ -131,6 +139,8 @@ class ir_eval
 
     /// Collection of scores used to calculate MAP and gMAP
     std::vector<double> scores_;
+
+    std::vector<double> mrr_res;
 
     /**
      * @param path The path to the relevance judgements
